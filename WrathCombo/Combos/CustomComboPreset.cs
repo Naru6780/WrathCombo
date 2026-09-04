@@ -9177,6 +9177,7 @@ public enum Preset
     [PvPCustomCombo]
     [ReplaceSkill(MNKPvP.PhantomRush)]
     [JobInfo(Job.MNK)]
+    [ConflictingCombos(MNKPvP_BurstV2)]
     MNKPvP_Burst = 119000,
 
     [ParentCombo(MNKPvP_Burst)]
@@ -9214,7 +9215,14 @@ public enum Preset
     [JobInfo(Job.MNK)]
     MNKPvP_Smite = 119007,
 
-    // Last value = 119007
+    [AutoAction(false, false)]
+    [PvPCustomCombo]
+    [ReplaceSkill(MNKPvP.PhantomRush)]
+    [JobInfo(Job.MNK)]
+    [ConflictingCombos(MNKPvP_Burst)]
+    MNKPvP_BurstV2 = 119008,
+
+    // Last value = 119008
 
     #endregion
 

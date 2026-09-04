@@ -45,7 +45,11 @@ internal static class MNKPvP
     public static class Config
     {
         public static UserInt
-            MNKPvP_SmiteThreshold = new("MNKPvP_SmiteThreshold");
+            MNKPvP_SmiteThreshold = new("MNKPvP_SmiteThreshold"),
+            MNKPvP_BurstV2_MeteodriveHP = new("MNKPvP_BurstV2_MeteodriveHP", 45),
+            MNKPvP_BurstV2_RiddleOfEarthHP = new("MNKPvP_BurstV2_RiddleOfEarthHP", 85),
+            MNKPvP_BurstV2_EarthReplyHP = new("MNKPvP_BurstV2_EarthReplyHP", 55),
+            MNKPvP_BurstV2_ThunderclapCharges = new("MNKPvP_BurstV2_ThunderclapCharges", 0);
 
         internal static void Draw(Preset preset)
         {
@@ -53,6 +57,16 @@ internal static class MNKPvP
             {
                 case Preset.MNKPvP_Smite:
                     DrawSliderInt(0, 100, MNKPvP_SmiteThreshold, "Target HP% to smite, Max damage below 25%");
+                    break;
+                case Preset.MNKPvP_BurstV2:
+                    DrawSliderInt(0, 100, MNKPvP_BurstV2_MeteodriveHP,
+                        "Use Meteodrive below target HP% (Guard is always removed)");
+                    DrawSliderInt(1, 100, MNKPvP_BurstV2_RiddleOfEarthHP,
+                        "Use Riddle of Earth when targeted below player HP%");
+                    DrawSliderInt(1, 100, MNKPvP_BurstV2_EarthReplyHP,
+                        "Use Earth's Reply below player HP% (also fires before expiry)");
+                    DrawSliderInt(0, 1, MNKPvP_BurstV2_ThunderclapCharges,
+                        "Thunderclap charges to keep");
                     break;
             }
         }
@@ -99,6 +113,139 @@ internal static class MNKPvP
 
             }
             return actionID;
+        }
+    }
+
+    /// <summary>
+    /// Cooldown-aware, single-target Monk PvP burst.
+    /// </summary>
+    internal class MNKPvP_BurstV2 : CustomCombo
+    {
+        protected internal override Preset Preset => Preset.MNKPvP_BurstV2;
+
+        protected override uint Invoke(uint actionID)
+        {
+            if (actionID is not (DragonKick or TwinSnakes or Demolish or LeapingOpo or RisingRaptor or PouncingCoeurl or PhantomRush))
+                return actionID;
+
+            uint adjustedCombo = OriginalHook(actionID);
+            if (!HasBattleTarget() || TargetIsDead())
+                return adjustedCombo;
+
+            bool hasBind = HasStatusEffect(PvPCommon.Debuffs.Bind, anyOwner: true);
+            bool targetHasGuard = HasStatusEffect(PvPCommon.Buffs.Guard, CurrentTarget, true);
+            bool targetHasInvulnerability = PvPCommon.TargetImmuneToDamage(false);
+            bool targetHasReduction = PvPCommon.TargetImmuneToDamage();
+            bool targetHasResilience = HasStatusEffect(PvPCommon.Buffs.Resilience, CurrentTarget, true);
+            bool targetHasPressurePoint = HasStatusEffect(Debuffs.PressurePoint, CurrentTarget);
+            bool hasFireResonance = HasStatusEffect(Buffs.FireResonance);
+            bool hasEarthReply = OriginalHook(RiddleOfEarth) is EarthsReply;
+            bool phantomRushReady = adjustedCombo is PhantomRush || ComboAction is PouncingCoeurl;
+
+            float playerHp = PlayerHealthPercentageHp();
+            float earthRemaining = GetStatusEffectRemainingTime(Buffs.EarthResonance);
+            float fireRemaining = GetStatusEffectRemainingTime(Buffs.FireResonance);
+            uint thunderclapCharges = GetRemainingCharges(Thunderclap);
+            uint risingPhoenixCharges = GetRemainingCharges(RisingPhoenix);
+            uint firesReplyCharges = GetRemainingCharges(FiresReply);
+
+            // Convert Earth Resonance into damage and healing before it expires,
+            // or sooner when the player needs the recovery.
+            if (hasEarthReply &&
+                (playerHp <= MNKPvP_BurstV2_EarthReplyHP || earthRemaining <= 2f))
+                return OriginalHook(RiddleOfEarth);
+
+            if (!hasEarthReply &&
+                IsOffCooldown(RiddleOfEarth) &&
+                InCombat() &&
+                playerHp <= MNKPvP_BurstV2_RiddleOfEarthHP &&
+                (IsPlayerTargeted() || playerHp <= 40))
+                return OriginalHook(RiddleOfEarth);
+
+            // Meteodrive removes Guard. Do this before ordinary immunity checks.
+            if (IsLB1Ready &&
+                targetHasGuard &&
+                !targetHasInvulnerability &&
+                !hasBind &&
+                InActionRange(Meteordrive))
+                return Meteordrive;
+
+            if (targetHasInvulnerability)
+                return adjustedCombo;
+
+            if (PvPMelee.CanSmite() &&
+                InActionRange(PvPMelee.Smite) &&
+                GetTargetHPPercent() <= 25)
+                return PvPMelee.Smite;
+
+            // Pressure Point lasts only four seconds. Fire's Reply reaches the
+            // knocked-back target and cashes out the bonus immediately.
+            if (targetHasPressurePoint)
+            {
+                if (firesReplyCharges > 0 && InActionRange(FiresReply))
+                    return OriginalHook(FiresReply);
+
+                if (!InMeleeRange() &&
+                    !hasBind &&
+                    thunderclapCharges > MNKPvP_BurstV2_ThunderclapCharges &&
+                    InActionRange(Thunderclap))
+                    return OriginalHook(Thunderclap);
+
+                if (InActionRange(adjustedCombo))
+                    return adjustedCombo;
+            }
+
+            if (targetHasReduction)
+                return adjustedCombo;
+
+            if (IsLB1Ready &&
+                GetTargetHPPercent() <= MNKPvP_BurstV2_MeteodriveHP &&
+                !hasBind &&
+                InActionRange(Meteordrive))
+                return Meteordrive;
+
+            // Never overwrite the best Fire Resonance target: Phantom Rush.
+            if (hasFireResonance && phantomRushReady && InActionRange(adjustedCombo))
+                return adjustedCombo;
+
+            // Avoid losing Fire Resonance if the prepared combo became unavailable.
+            if (hasFireResonance && fireRemaining <= 2f && InActionRange(adjustedCombo))
+                return adjustedCombo;
+
+            if (phantomRushReady)
+            {
+                if (IsOffCooldown(WindsReply) &&
+                    firesReplyCharges > 0 &&
+                    !targetHasResilience &&
+                    InActionRange(WindsReply))
+                    return WindsReply;
+
+                if (firesReplyCharges > 0 && InActionRange(FiresReply))
+                    return OriginalHook(FiresReply);
+
+                if (!InMeleeRange() &&
+                    !hasBind &&
+                    thunderclapCharges > MNKPvP_BurstV2_ThunderclapCharges &&
+                    InActionRange(Thunderclap))
+                    return OriginalHook(Thunderclap);
+
+                if (!hasFireResonance &&
+                    risingPhoenixCharges > 0 &&
+                    GetTargetDistance() <= 6)
+                    return OriginalHook(RisingPhoenix);
+
+                if (InActionRange(adjustedCombo))
+                    return adjustedCombo;
+            }
+
+            // Thunderclap is also the normal way to begin or resume the combo.
+            if (!InMeleeRange() &&
+                !hasBind &&
+                thunderclapCharges > MNKPvP_BurstV2_ThunderclapCharges &&
+                InActionRange(Thunderclap))
+                return OriginalHook(Thunderclap);
+
+            return adjustedCombo;
         }
     }
 }
