@@ -8530,6 +8530,16 @@ This is the ideal option for newcomers to the job.</value>
   <data name="SAMPvP_Burst_Name" xml:space="preserve">
     <value>Burst Mode</value>
   </data>
+  <data name="SAMPvP_BurstV2_Desc" xml:space="preserve">
+    <value>Turns Kasha Combo into an aggressive all-in-one Samurai burst button.
+- Prepares Hyosetsu before spending Soten.
+- Rushes the target, binds, stuns, and uses available burst finishers.
+- Uses Zantetsuken only on targets afflicted with your Kuzushi.
+- Will not replace Guard, Recuperate, Purify, or Sprint.</value>
+  </data>
+  <data name="SAMPvP_BurstV2_Name" xml:space="preserve">
+    <value>Burst V2</value>
+  </data>
   <data name="SAMPvP_Chiten_Desc" xml:space="preserve">
     <value>Uses Chiten when available.
 - Will not use outside combat.

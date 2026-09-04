@@ -9621,6 +9621,7 @@ public enum Preset
     [PvPCustomCombo]
     [ReplaceSkill(SAMPvP.Yukikaze)]
     [JobInfo(Job.SAM)]
+    [ConflictingCombos(SAMPvP_BurstV2)]
     SAMPvP_Burst = 125000,
 
     [PvPCustomCombo]
@@ -9653,7 +9654,14 @@ public enum Preset
     [JobInfo(Job.SAM)]
     SAMPvP_Smite = 125006,
 
-    // Last value = 125006
+    [AutoAction(false, false)]
+    [PvPCustomCombo]
+    [ReplaceSkill(SAMPvP.Yukikaze)]
+    [JobInfo(Job.SAM)]
+    [ConflictingCombos(SAMPvP_Burst)]
+    SAMPvP_BurstV2 = 125007,
+
+    // Last value = 125007
 
     #endregion
 

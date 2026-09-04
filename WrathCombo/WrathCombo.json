@@ -1,11 +1,11 @@
 {
   "Author": "Team Wrath",
-  "Name": "Wrath Combo",
+  "Name": "Wrath Combo - Burst V2",
   "InternalName": "WrathCombo",
   "DalamudApiLevel": 15,
-  "Punchline": "Condenses combos and mutually exclusive abilities onto a single button - and then some.",
-  "Description": "Condenses combos and mutually exclusive abilities onto a single button - and then some.",
-  "RepoUrl": "https://github.com/PunishXIV/WrathCombo",
+  "Punchline": "Custom Wrath Combo fork featuring Samurai PvP Burst V2.",
+  "Description": "Custom Wrath Combo fork featuring a context-aware Samurai PvP Burst V2 button.",
+  "RepoUrl": "https://github.com/Naru6780/WrathCombo",
   "IconUrl": "https://s3.puni.sh/media/plugin/60/icon-2bwhkn3zf1f.png",
   "Changelog": "Please check the project's GitHub or Discord for a full changelog.",
   "Tags": [
