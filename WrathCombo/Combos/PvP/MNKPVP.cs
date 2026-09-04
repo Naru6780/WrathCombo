@@ -45,8 +45,7 @@ internal static class MNKPvP
     public static class Config
     {
         public static UserInt
-            MNKPvP_SmiteThreshold = new("MNKPvP_SmiteThreshold"),
-            MNKPvP_BurstV2_RiddleOfEarthHP = new("MNKPvP_BurstV2_RiddleOfEarthHP", 85);
+            MNKPvP_SmiteThreshold = new("MNKPvP_SmiteThreshold");
 
         internal static void Draw(Preset preset)
         {
@@ -54,10 +53,6 @@ internal static class MNKPvP
             {
                 case Preset.MNKPvP_Smite:
                     DrawSliderInt(0, 100, MNKPvP_SmiteThreshold, "Target HP% to smite, Max damage below 25%");
-                    break;
-                case Preset.MNKPvP_BurstV2:
-                    DrawSliderInt(1, 100, MNKPvP_BurstV2_RiddleOfEarthHP,
-                        "Use Riddle of Earth when targeted below player HP%");
                     break;
             }
         }
@@ -135,7 +130,6 @@ internal static class MNKPvP
             bool phantomRushJustUsed = ComboAction is PhantomRush && !phantomRushReady;
             bool isPlayerTargeted = IsPlayerTargeted();
 
-            float playerHp = PlayerHealthPercentageHp();
             float earthRemaining = GetStatusEffectRemainingTime(Buffs.EarthResonance);
             float fireRemaining = GetStatusEffectRemainingTime(Buffs.FireResonance);
             uint thunderclapCharges = GetRemainingCharges(Thunderclap);
@@ -149,9 +143,7 @@ internal static class MNKPvP
 
             if (!hasEarthReply &&
                 IsOffCooldown(RiddleOfEarth) &&
-                InCombat() &&
-                playerHp <= MNKPvP_BurstV2_RiddleOfEarthHP &&
-                (isPlayerTargeted || playerHp <= 40))
+                InCombat())
                 return OriginalHook(RiddleOfEarth);
 
             // Meteodrive removes Guard. Do this before ordinary immunity checks.
