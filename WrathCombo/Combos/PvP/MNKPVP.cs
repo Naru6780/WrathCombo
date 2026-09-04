@@ -46,10 +46,7 @@ internal static class MNKPvP
     {
         public static UserInt
             MNKPvP_SmiteThreshold = new("MNKPvP_SmiteThreshold"),
-            MNKPvP_BurstV2_MeteodriveHP = new("MNKPvP_BurstV2_MeteodriveHP", 45),
-            MNKPvP_BurstV2_RiddleOfEarthHP = new("MNKPvP_BurstV2_RiddleOfEarthHP", 85),
-            MNKPvP_BurstV2_EarthReplyHP = new("MNKPvP_BurstV2_EarthReplyHP", 55),
-            MNKPvP_BurstV2_ThunderclapCharges = new("MNKPvP_BurstV2_ThunderclapCharges", 0);
+            MNKPvP_BurstV2_RiddleOfEarthHP = new("MNKPvP_BurstV2_RiddleOfEarthHP", 85);
 
         internal static void Draw(Preset preset)
         {
@@ -59,14 +56,8 @@ internal static class MNKPvP
                     DrawSliderInt(0, 100, MNKPvP_SmiteThreshold, "Target HP% to smite, Max damage below 25%");
                     break;
                 case Preset.MNKPvP_BurstV2:
-                    DrawSliderInt(0, 100, MNKPvP_BurstV2_MeteodriveHP,
-                        "Use Meteodrive below target HP% (Guard is always removed)");
                     DrawSliderInt(1, 100, MNKPvP_BurstV2_RiddleOfEarthHP,
                         "Use Riddle of Earth when targeted below player HP%");
-                    DrawSliderInt(1, 100, MNKPvP_BurstV2_EarthReplyHP,
-                        "Use Earth's Reply below player HP% (also fires before expiry)");
-                    DrawSliderInt(0, 1, MNKPvP_BurstV2_ThunderclapCharges,
-                        "Thunderclap charges to keep");
                     break;
             }
         }
@@ -141,6 +132,8 @@ internal static class MNKPvP
             bool hasFireResonance = HasStatusEffect(Buffs.FireResonance);
             bool hasEarthReply = OriginalHook(RiddleOfEarth) is EarthsReply;
             bool phantomRushReady = adjustedCombo is PhantomRush || ComboAction is PouncingCoeurl;
+            bool phantomRushJustUsed = ComboAction is PhantomRush && !phantomRushReady;
+            bool isPlayerTargeted = IsPlayerTargeted();
 
             float playerHp = PlayerHealthPercentageHp();
             float earthRemaining = GetStatusEffectRemainingTime(Buffs.EarthResonance);
@@ -149,17 +142,16 @@ internal static class MNKPvP
             uint risingPhoenixCharges = GetRemainingCharges(RisingPhoenix);
             uint firesReplyCharges = GetRemainingCharges(FiresReply);
 
-            // Convert Earth Resonance into damage and healing before it expires,
-            // or sooner when the player needs the recovery.
-            if (hasEarthReply &&
-                (playerHp <= MNKPvP_BurstV2_EarthReplyHP || earthRemaining <= 2f))
+            // Hold the full eight-second collection window. Earth's Reply only
+            // becomes urgent in its final second, maximizing stored damage/healing.
+            if (hasEarthReply && earthRemaining <= 1f)
                 return OriginalHook(RiddleOfEarth);
 
             if (!hasEarthReply &&
                 IsOffCooldown(RiddleOfEarth) &&
                 InCombat() &&
                 playerHp <= MNKPvP_BurstV2_RiddleOfEarthHP &&
-                (IsPlayerTargeted() || playerHp <= 40))
+                (isPlayerTargeted || playerHp <= 40))
                 return OriginalHook(RiddleOfEarth);
 
             // Meteodrive removes Guard. Do this before ordinary immunity checks.
@@ -178,54 +170,75 @@ internal static class MNKPvP
                 GetTargetHPPercent() <= 25)
                 return PvPMelee.Smite;
 
-            // Pressure Point lasts only four seconds. Fire's Reply reaches the
-            // knocked-back target and cashes out the bonus immediately.
+            // Pressure Point belongs on Phantom Rush. Thunderclap supplies its
+            // defensive barrier while reconnecting without consuming either buff.
             if (targetHasPressurePoint)
             {
-                if (firesReplyCharges > 0 && InActionRange(FiresReply))
-                    return OriginalHook(FiresReply);
-
                 if (!InMeleeRange() &&
                     !hasBind &&
-                    thunderclapCharges > MNKPvP_BurstV2_ThunderclapCharges &&
+                    thunderclapCharges > 0 &&
                     InActionRange(Thunderclap))
                     return OriginalHook(Thunderclap);
 
-                if (InActionRange(adjustedCombo))
+                if (!hasFireResonance &&
+                    risingPhoenixCharges > 0 &&
+                    GetTargetDistance() <= 6)
+                    return OriginalHook(RisingPhoenix);
+
+                if (phantomRushReady && InActionRange(adjustedCombo))
                     return adjustedCombo;
+
+                // If reconnecting is impossible, at least cash out the short
+                // Pressure Point window with a ranged weaponskill.
+                if (firesReplyCharges > 0 && InActionRange(FiresReply))
+                    return OriginalHook(FiresReply);
             }
 
             if (targetHasReduction)
                 return adjustedCombo;
 
-            if (IsLB1Ready &&
-                GetTargetHPPercent() <= MNKPvP_BurstV2_MeteodriveHP &&
-                !hasBind &&
-                InActionRange(Meteordrive))
-                return Meteordrive;
+            // The target has already taken the compressed Wind/Phantom package.
+            // Meteodrive is now a finisher instead of a telegraphed opener.
+            if (phantomRushJustUsed)
+            {
+                if (IsLB1Ready && !hasBind && InActionRange(Meteordrive))
+                    return Meteordrive;
 
-            // Never overwrite the best Fire Resonance target: Phantom Rush.
-            if (hasFireResonance && phantomRushReady && InActionRange(adjustedCombo))
-                return adjustedCombo;
+                if (firesReplyCharges > 0 && InActionRange(FiresReply))
+                    return OriginalHook(FiresReply);
+            }
 
-            // Avoid losing Fire Resonance if the prepared combo became unavailable.
+            // Avoid losing an existing Fire Resonance while preparing the combo.
             if (hasFireResonance && fireRemaining <= 2f && InActionRange(adjustedCombo))
                 return adjustedCombo;
 
             if (phantomRushReady)
             {
+                // With two Rising Phoenix charges, empower Wind's Reply first
+                // while reserving the second 50% buff for Phantom Rush.
                 if (IsOffCooldown(WindsReply) &&
-                    firesReplyCharges > 0 &&
-                    !targetHasResilience &&
-                    InActionRange(WindsReply))
-                    return WindsReply;
+                    !targetHasResilience)
+                {
+                    if (!hasFireResonance && risingPhoenixCharges > 1)
+                    {
+                        if (GetTargetDistance() > 6 &&
+                            !hasBind &&
+                            thunderclapCharges > 1 &&
+                            InActionRange(Thunderclap))
+                            return OriginalHook(Thunderclap);
 
-                if (firesReplyCharges > 0 && InActionRange(FiresReply))
-                    return OriginalHook(FiresReply);
+                        if (GetTargetDistance() <= 6)
+                            return OriginalHook(RisingPhoenix);
+                    }
+
+                    if ((hasFireResonance || risingPhoenixCharges <= 1) &&
+                        InActionRange(WindsReply))
+                        return WindsReply;
+                }
 
                 if (!InMeleeRange() &&
                     !hasBind &&
-                    thunderclapCharges > MNKPvP_BurstV2_ThunderclapCharges &&
+                    thunderclapCharges > 0 &&
                     InActionRange(Thunderclap))
                     return OriginalHook(Thunderclap);
 
@@ -238,10 +251,13 @@ internal static class MNKPvP
                     return adjustedCombo;
             }
 
-            // Thunderclap is also the normal way to begin or resume the combo.
-            if (!InMeleeRange() &&
+            // During the six-hit preparation, spend only surplus Thunderclap
+            // charges. This refreshes an 8,000 barrier while reserving one charge
+            // for the mandatory reconnect after Wind's Reply.
+            if (!phantomRushReady &&
                 !hasBind &&
-                thunderclapCharges > MNKPvP_BurstV2_ThunderclapCharges &&
+                thunderclapCharges > 1 &&
+                (isPlayerTargeted || !InMeleeRange()) &&
                 InActionRange(Thunderclap))
                 return OriginalHook(Thunderclap);
 
