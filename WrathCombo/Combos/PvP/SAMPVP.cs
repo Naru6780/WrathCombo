@@ -61,7 +61,7 @@ internal static class SAMPvP
             SAMPvP_SmiteThreshold = new("SAMPvP_SmiteThreshold", 25),
             SAMPvP_BurstV2_MinKuzushiTargets = new("SAMPvP_BurstV2_MinKuzushiTargets", 1),
             SAMPvP_BurstV2_SotenCharges = new("SAMPvP_BurstV2_SotenCharges", 0),
-            SAMPvP_BurstV2_ZanshinHP = new("SAMPvP_BurstV2_ZanshinHP", 60);
+            SAMPvP_BurstV2_ChitenHP = new("SAMPvP_BurstV2_ChitenHP", 85);
 
         public static UserBool
             SAMPvP_Soten_SubOption = new("SAMPvP_Soten_SubOption"),
@@ -102,8 +102,8 @@ internal static class SAMPvP
                         "Minimum Kuzushi targets near the selected target before using Zantetsuken");
                     DrawSliderInt(0, 2, SAMPvP_BurstV2_SotenCharges,
                         "Soten charges to keep");
-                    DrawSliderInt(10, 100, SAMPvP_BurstV2_ZanshinHP,
-                        "Use Zanshin before Tendo below player HP%");
+                    DrawSliderInt(10, 100, SAMPvP_BurstV2_ChitenHP,
+                        "Use Chiten when targeted below player HP%");
                     DrawAdditionalBoolChoice(SAMPvP_BurstV2_SingleTargetOgi,
                         "Single-target Ogi",
                         "Only uses Ogi Namikiri when its cone will hit exactly one target for maximum single-target potency. Leave disabled for automatic defensive AoE use and shielding.");
@@ -238,6 +238,8 @@ internal static class SAMPvP
             bool hasTendo = OriginalHook(MeikyoShisui) is TendoSetsugekka;
             bool hasTendoKaeshi = OriginalHook(MeikyoShisui) is TendoKaeshiSetsugekka;
             float zanshinRemaining = LocalPlayer?.Status(Buffs.ZanshinReady).RemainingTimeOrZero() ?? 0f;
+            float playerHpPercent = PlayerHealthPercentageHp();
+            bool isPlayerTargeted = IsPlayerTargeted();
             bool targetHasKuzushi = HasStatusEffect(Debuffs.Kuzushi, CurrentTarget);
             bool isYukikazePrimed = ComboTimer == 0 || ComboAction is Kasha;
             bool targetHasInvulnerability = PvPCommon.TargetImmuneToDamage(false);
@@ -269,6 +271,29 @@ internal static class SAMPvP
             // Zantetsuken bypasses it; barriers are accounted for above.
             if (zantetsukenReady)
                 return OriginalHook(Zantetsuken);
+
+            // Hold Chiten's follow-up for almost its full ten-second window.
+            // At two seconds remaining, Zanshin becomes urgent and takes
+            // priority so the stored attack and heal are not lost.
+            bool expiringZanshin = hasZanshin &&
+                                   zanshinRemaining <= 2f &&
+                                   InActionRange(Zanshin);
+
+            if (expiringZanshin)
+                return OriginalHook(Chiten);
+
+            // Chiten is a defensive reserve, not an automatic pre-dive button.
+            // Use it only once incoming attention has translated into damage;
+            // at critical HP, use it even if the attacker changed targets.
+            bool chitenNeeded = !hasChiten &&
+                                !hasZanshin &&
+                                IsOffCooldown(Chiten) &&
+                                InCombat() &&
+                                playerHpPercent <= SAMPvP_BurstV2_ChitenHP &&
+                                (isPlayerTargeted || playerHpPercent <= 40);
+
+            if (chitenNeeded)
+                return OriginalHook(Chiten);
 
             // Smite also ignores Guard and should secure an execute before a
             // longer cast sequence gives the target time to recover.
@@ -302,13 +327,6 @@ internal static class SAMPvP
             if (!hasTendo && !hasTendoKaeshi && IsOffCooldown(MeikyoShisui) && canEngage)
                 return OriginalHook(MeikyoShisui);
 
-            bool majorBurstReady = IsLB1Ready || ogiReady || tendoReady;
-
-            // Chiten is used offensively immediately before the dive so hits
-            // during the four-second window can apply Kuzushi and arm Zanshin.
-            if (!hasChiten && !hasZanshin && IsOffCooldown(Chiten) && majorBurstReady && canEngage)
-                return OriginalHook(Chiten);
-
             // Spend Soten only when Yukikaze is next. Keeping this invariant
             // prevents unwanted Mangetsu and Oka transformations.
             if (!hasKaiten &&
@@ -335,26 +353,8 @@ internal static class SAMPvP
             if (ogiReady && !isMoving && InActionRange(OgiNamikiri))
                 return OriginalHook(OgiNamikiri);
 
-            bool zanshinInRange = hasZanshin && InActionRange(Zanshin);
-            bool urgentZanshin = zanshinInRange &&
-                                 (PlayerHealthPercentageHp() <= SAMPvP_BurstV2_ZanshinHP ||
-                                  NumberOfEnemiesInRange(Zanshin, CurrentTarget) >= 2 ||
-                                  isMoving ||
-                                  zanshinRemaining <= 2f);
-
-            // Meikyo is applied before Chiten, so Tendo Ready is normally the
-            // older proc. Zanshin only jumps ahead for an urgent heal, valuable
-            // multi-target hit, movement, or an expiring Zanshin Ready window.
-            if (urgentZanshin)
-                return OriginalHook(Chiten);
-
             if (hasTendo && !isMoving && InActionRange(TendoSetsugekka))
                 return OriginalHook(MeikyoShisui);
-
-            // Once the Tendo pair is safely consumed, spend the remaining
-            // Zanshin proc rather than carrying it into the basic combo.
-            if (zanshinInRange)
-                return OriginalHook(Chiten);
 
             return adjustedCombo;
         }
