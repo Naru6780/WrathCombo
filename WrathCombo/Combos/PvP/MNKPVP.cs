@@ -127,11 +127,18 @@ internal static class MNKPvP
             bool hasFireResonance = HasStatusEffect(Buffs.FireResonance);
             bool hasEarthReply = OriginalHook(RiddleOfEarth) is EarthsReply;
             bool phantomRushReady = adjustedCombo is PhantomRush || ComboAction is PouncingCoeurl;
-            bool phantomRushJustUsed = ComboAction is PhantomRush && !phantomRushReady;
+            bool phantomRushJustUsed = JustUsed(PhantomRush, 4f);
             bool isPlayerTargeted = IsPlayerTargeted();
 
             float earthRemaining = GetStatusEffectRemainingTime(Buffs.EarthResonance);
             float fireRemaining = GetStatusEffectRemainingTime(Buffs.FireResonance);
+            uint targetMaxHp = GetTargetMaxHP();
+            float targetEffectiveHp = targetMaxHp *
+                                      GetTargetHPPercent(CurrentTarget, includeShield: true, forceUsePending: true) /
+                                      100f;
+            bool hasReliableTargetHp = targetMaxHp > 0 && targetEffectiveHp > 0;
+            bool meteodriveIsLethal = hasReliableTargetHp &&
+                                      targetEffectiveHp <= 24000f;
             uint thunderclapCharges = GetRemainingCharges(Thunderclap);
             uint risingPhoenixCharges = GetRemainingCharges(RisingPhoenix);
             uint firesReplyCharges = GetRemainingCharges(FiresReply);
@@ -139,11 +146,6 @@ internal static class MNKPvP
             // Hold the full eight-second collection window. Earth's Reply only
             // becomes urgent in its final second, maximizing stored damage/healing.
             if (hasEarthReply && earthRemaining <= 1f)
-                return OriginalHook(RiddleOfEarth);
-
-            if (!hasEarthReply &&
-                IsOffCooldown(RiddleOfEarth) &&
-                InCombat())
                 return OriginalHook(RiddleOfEarth);
 
             // Meteodrive removes Guard. Do this before ordinary immunity checks.
@@ -161,6 +163,121 @@ internal static class MNKPvP
                 InActionRange(PvPMelee.Smite) &&
                 GetTargetHPPercent() <= 25)
                 return PvPMelee.Smite;
+
+            // An early Wind execute has already committed Pressure Point. Finish
+            // it at range rather than spending Thunderclap or waiting for Phantom.
+            if (targetHasPressurePoint && !phantomRushReady)
+            {
+                if (firesReplyCharges > 0 && InActionRange(FiresReply))
+                {
+                    // Pressure Point plus an unbuffed Fire is already 20k.
+                    // Do not spend the second Phoenix charge unless its 24k
+                    // empowered package is actually required to finish.
+                    if (hasFireResonance || targetEffectiveHp <= 20000f)
+                        return OriginalHook(FiresReply);
+
+                    float empoweredPressureFire = 24000f +
+                                                    (GetTargetDistance() <= 6 ? 4000f : 0f);
+
+                    if (!hasFireResonance &&
+                        risingPhoenixCharges > 0 &&
+                        targetEffectiveHp <= empoweredPressureFire)
+                        return OriginalHook(RisingPhoenix);
+
+                    // The prediction can shift as mitigation or healing lands;
+                    // preserve Pressure Point with the strongest available hit.
+                    if (!hasFireResonance && risingPhoenixCharges > 0)
+                        return OriginalHook(RisingPhoenix);
+
+                    return OriginalHook(FiresReply);
+                }
+            }
+
+            // Choose the smallest Fire/Wind package that is already lethal
+            // instead of continuing to build the full Phantom Rush burst.
+            if (hasReliableTargetHp &&
+                !targetHasReduction &&
+                firesReplyCharges > 0 &&
+                InActionRange(FiresReply))
+            {
+                float phoenixDamage = GetTargetDistance() <= 6 ? 4000f : 0f;
+
+                // An unbuffed Fire's Reply is the fastest possible ranged kill.
+                if (!hasFireResonance && targetEffectiveHp <= 8000f)
+                    return OriginalHook(FiresReply);
+
+                // One empowered Fire's Reply is the next-smallest package.
+                if (!hasFireResonance &&
+                    risingPhoenixCharges > 0 &&
+                    targetEffectiveHp <= 12000f + phoenixDamage)
+                    return OriginalHook(RisingPhoenix);
+
+                if (hasFireResonance)
+                {
+                    if (targetEffectiveHp <= 12000f)
+                        return OriginalHook(FiresReply);
+
+                    // Fire Resonance is already armed. If Wind can make the
+                    // remaining Wind/Pressure Point/Fire package lethal, use it.
+                    float armedWindFireDamage = 32000f +
+                                                (risingPhoenixCharges > 0 ? 4000f : 0f);
+
+                    if (IsOffCooldown(WindsReply) &&
+                        !targetHasResilience &&
+                        InActionRange(WindsReply) &&
+                        targetEffectiveHp <= armedWindFireDamage)
+                        return WindsReply;
+
+                    uint additionalPairs = System.Math.Min(firesReplyCharges - 1, risingPhoenixCharges);
+                    uint additionalUnbuffedFires = firesReplyCharges - 1 - additionalPairs;
+                    float remainingFirePackage = 12000f +
+                                                 additionalPairs * (12000f + phoenixDamage) +
+                                                 additionalUnbuffedFires * 8000f;
+
+                    if (targetEffectiveHp <= remainingFirePackage)
+                        return OriginalHook(FiresReply);
+                }
+                else
+                {
+                    // Prefer Wind over a second Fire charge: empowered Wind is
+                    // 12k, then Pressure Point adds another 12k to the empowered
+                    // Fire. A Phoenix hit before Wind contributes another 4k.
+                    float windFireDamage = 28000f +
+                                           System.Math.Min(risingPhoenixCharges, 2u) * 4000f +
+                                           (risingPhoenixCharges > 0 ? phoenixDamage : 0f);
+
+                    if (IsOffCooldown(WindsReply) &&
+                        !targetHasResilience &&
+                        InActionRange(WindsReply) &&
+                        targetEffectiveHp <= windFireDamage)
+                    {
+                        if (risingPhoenixCharges > 0)
+                            return OriginalHook(RisingPhoenix);
+
+                        return WindsReply;
+                    }
+
+                    uint availablePairs = System.Math.Min(firesReplyCharges, risingPhoenixCharges);
+                    uint availableUnbuffedFires = firesReplyCharges - availablePairs;
+                    float availableFirePackage = availablePairs * (12000f + phoenixDamage) +
+                                                 availableUnbuffedFires * 8000f;
+
+                    if (targetEffectiveHp <= availableFirePackage)
+                        return availablePairs > 0
+                            ? OriginalHook(RisingPhoenix)
+                            : OriginalHook(FiresReply);
+
+                }
+            }
+
+            // Do not hold a lethal LB for the formal burst window. Pending HP
+            // changes and the target's barrier are included in this calculation.
+            if (IsLB1Ready &&
+                meteodriveIsLethal &&
+                !targetHasReduction &&
+                !hasBind &&
+                InActionRange(Meteordrive))
+                return Meteordrive;
 
             // Pressure Point belongs on Phantom Rush. Thunderclap supplies its
             // defensive barrier while reconnecting without consuming either buff.
@@ -199,6 +316,14 @@ internal static class MNKPvP
                 if (firesReplyCharges > 0 && InActionRange(FiresReply))
                     return OriginalHook(FiresReply);
             }
+
+            // Start the defensive collection window after all immediate kill
+            // checks and committed Pressure Point sequences, so a fresh Riddle
+            // never delays a confirmed execute.
+            if (!hasEarthReply &&
+                IsOffCooldown(RiddleOfEarth) &&
+                InCombat())
+                return OriginalHook(RiddleOfEarth);
 
             // Avoid losing an existing Fire Resonance while preparing the combo.
             if (hasFireResonance && fireRemaining <= 2f && InActionRange(adjustedCombo))
